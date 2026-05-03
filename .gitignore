@@ -1,0 +1,22 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.class
+
+# IDEs
+.vscode/
+.idea/
+
+# Virtual Environments
+venv/
+env/
+.venv/
+.env/
+
+# Project specific caches and dynamic directories
+logs/
+temp/
+src/test/
+
+# Ignore local configuration overrides
+config/settings.json

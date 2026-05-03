@@ -37,14 +37,22 @@ if __name__ == "__main__":
     if not ctypes.windll.shell32.IsUserAnAdmin():
         print("当前无管理员权限，正在请求 UAC 提权...")
         
-        if DEBUG_MODE:
-            # 调试模式：用原生的 python.exe，保留黑框看日志
-            exe = sys.executable 
+        if getattr(sys, 'frozen', False):
+            # 如果是 PyInstaller 打包后的 exe 环境
+            exe = sys.executable
+            # 传递原始启动参数
+            params = " ".join(sys.argv[1:])
+            ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, None, 1)
         else:
-            # 发布模式：用 pythonw.exe，隐藏黑框
-            exe = sys.executable.replace("python.exe", "pythonw.exe")
-            
-        ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, __file__, None, 1)
+            # 如果是源码开发环境
+            if DEBUG_MODE:
+                # 调试模式：用原生的 python.exe，保留黑框看日志
+                exe = sys.executable 
+            else:
+                # 发布模式：用 pythonw.exe，隐藏黑框
+                exe = sys.executable.replace("python.exe", "pythonw.exe")
+                
+            ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, __file__, None, 1)
         sys.exit()
 
     # 只有拿到管理员权限后，才会真正启动 UI 界面

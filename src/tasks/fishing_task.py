@@ -89,11 +89,11 @@ class FishingTask:
             if logger: logger(msg_bait)
             else: print(msg_bait)
             self.keyboard.press_key('r')  # 模拟按下 'R' 键购买鱼饵
-            time.sleep(0.5)
+            time.sleep(1)
             self.mouse.click(1820, 950)  # 点击到购买上限
-            time.sleep(0.5)
+            time.sleep(1)
             self.mouse.click(1600, 1030)  # 点击购买
-            time.sleep(0.5)
+            time.sleep(1)
             save_parh = self.execute_screenshot(logger=logger)  # 再次截图，检测购买结果
             roi_buy = [830, 500, 1100, 580] # 购买结果提示的 ROI 区域坐标示例 [x1, y1, x2, y2]
             similarity_buy = self.matcher.compare_similarity(screen_image=save_parh, reference_image="fish-8.png", roi=roi_buy)
@@ -103,20 +103,19 @@ class FishingTask:
                 else: print(msg_buy)
                 raise RuntimeError(msg_buy)
             else:
-                time.sleep(0.5)
                 self.mouse.click(1160, 700) # 点击确认
-                time.sleep(0.5)
+                time.sleep(2)
                 self.mouse.click(950,900)  # 点击确认购买后关闭提示框
-                time.sleep(0.5)
+                time.sleep(1)
                 self.mouse.click(1830,60) # 点击关闭购买界面
-                time.sleep(0.5)
+                time.sleep(1)
                 msg_buy_success = f"已成功购买鱼饵，继续执行钓鱼任务..."
                 if logger: logger(msg_buy_success)
                 else: print(msg_buy_success)
                 self.keyboard.press_key('e') # 按下 'E' 键装备鱼饵
-                time.sleep(0.5)
+                time.sleep(1)
                 self.mouse.click(1170,700) # 点击更换鱼饵
-                time.sleep(0.5)
+                time.sleep(1)
                 self.keyboard.press_key('f')  # 再次按下 'F' 键开始钓鱼
 
         time.sleep(1)  # 等待钓鱼上钩的提示出现

@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *.class
+build.py
 
 # IDEs
 .vscode/
@@ -20,3 +21,8 @@ src/test/
 
 # Ignore local configuration overrides
 config/settings.json
+
+# PyInstaller
+build/
+dist/
+*.spec

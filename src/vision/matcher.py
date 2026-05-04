@@ -272,10 +272,10 @@ class ImageMatcher:
         gray_template = cv2.cvtColor(img_template, cv2.COLOR_BGR2GRAY)
         
         # 3. 核心：固定阈值二值化（过滤掉背景）
-        # 提取亮度大于 200 的像素（纯白图标），其他全变黑。
-        # 注意：这个 200 可能需要根据游戏实际亮度微调 (200~255 之间)
-        _, binary_screen = cv2.threshold(gray_screen, 200, 255, cv2.THRESH_BINARY)
-        _, binary_template = cv2.threshold(gray_template, 200, 255, cv2.THRESH_BINARY)
+        # 提取亮度大于 220 的像素（纯白图标），其他全变黑。
+        # 注意：这个 220 可能需要根据游戏实际亮度微调 (200~255 之间)
+        _, binary_screen = cv2.threshold(gray_screen, 220, 255, cv2.THRESH_BINARY)
+        _, binary_template = cv2.threshold(gray_template, 220, 255, cv2.THRESH_BINARY)
         
         # 4. 在两张黑白图上进行模板匹配
         res = cv2.matchTemplate(binary_screen, binary_template, cv2.TM_CCOEFF_NORMED)

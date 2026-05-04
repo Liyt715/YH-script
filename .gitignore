@@ -18,6 +18,7 @@ env/
 logs/
 temp/
 src/test/
+error/
 
 # Ignore local configuration overrides
 config/settings.json

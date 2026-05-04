@@ -1,6 +1,7 @@
 import sys
 import os
 import time
+import cv2
 
 # 将项目根目录加进系统路径，方便单独运行这个文件进行测试
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -74,6 +75,13 @@ class FishingTask:
             else: print(msg)
         else:
             msg = f"未检测到钓鱼按钮，无法执行钓鱼任务！请检查游戏画面是否正确，或调整模板图片和阈值。"
+            import shutil
+            error_dir = os.path.join(root_dir, "error")
+            os.makedirs(error_dir, exist_ok=True)
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            error_img_path = os.path.join(error_dir, f"{timestamp}_未检测到钓鱼按钮.png")
+            shutil.copy(saved_path, error_img_path)
+            if logger: logger(f"异常截图已保存至: {error_img_path}")
             raise RuntimeError(msg)
         
         msg_start = f"第 {cnt} 次执行钓鱼任务..."
@@ -88,6 +96,27 @@ class FishingTask:
             msg_bait = f"检测到鱼饵用完提示，正在自动购买鱼饵..."
             if logger: logger(msg_bait)
             else: print(msg_bait)
+            self.keyboard.press_key('q')  # 模拟按下 'Q' 键打开商店界面
+            time.sleep(1)
+            self.mouse.click(150, 400)  # 点击到鱼饵分类
+            time.sleep(1)
+            save_parh_shop = self.execute_screenshot(logger=logger)  # 再次截图，检测商店界面是否正确打开
+            roi_shop = [550,500,850,750] 
+            similarity_if_fish = self.matcher.compare_similarity(screen_image=save_parh_shop, reference_image="fish-10.png", roi=roi_shop)
+            time.sleep(0.5)
+            if similarity_if_fish < 0.8:
+                self.mouse.click(1060, 960)  # 点击卖出
+                time.sleep(1)
+                self.mouse.click(1170, 700)  # 点击确认卖出
+                time.sleep(1)
+                self.mouse.click(1830,60) # 点击关闭商店界面
+                time.sleep(1)
+            else:
+                msg_shop = f"商店界面没有鱼可以卖出"
+                if logger: logger(msg_shop)
+                else: print(msg_shop)
+            self.mouse.click(1830,60) # 点击关闭商店界面
+            time.sleep(1)
             self.keyboard.press_key('r')  # 模拟按下 'R' 键购买鱼饵
             time.sleep(1)
             self.mouse.click(1820, 950)  # 点击到购买上限
@@ -129,6 +158,13 @@ class FishingTask:
             saved_path = self.execute_screenshot(logger=logger)
             similarity = self.matcher.compare_similarity(screen_image=saved_path, reference_image="fish-2.png", roi=roi_state)
             if time.time() - pre_time > 10:  # 超过 10 秒还未检测到，认为失败
+                import shutil
+                error_dir = os.path.join(root_dir, "error")
+                os.makedirs(error_dir, exist_ok=True)
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                error_img_path = os.path.join(error_dir, f"{timestamp}_钓鱼状态提示长时间未出现.png")
+                shutil.copy(saved_path, error_img_path)
+                if logger: logger(f"异常截图已保存至: {error_img_path}")
                 raise RuntimeError("钓鱼状态提示长时间未出现，任务执行失败！")
         self.keyboard.press_key('f')  # 继续点击 'F' 键
         """
@@ -148,6 +184,7 @@ class FishingTask:
             # 2. 获取当前进度条状态
             status = self.matcher.get_fishing_bar_status(live_screen, roi_rect=bar_roi)
             if status is None: #加强一次
+                time.sleep(0.1) # 等待 100ms 再试一次，避免偶尔的截图失败导致误判
                 live_screen = self.capturer.grab_screen()
                 status = self.matcher.get_fishing_bar_status(live_screen, roi_rect=bar_roi)
             
@@ -156,6 +193,10 @@ class FishingTask:
                 # 如果连续找不到进度条，说明钓鱼可能结束了（成功或失败）
                 if logger: logger("未检测到进度条，溜鱼结束。")
                 else: print("未检测到进度条，溜鱼结束。")
+                error_dir = os.path.join(root_dir, "error")
+                os.makedirs(error_dir, exist_ok=True)
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                error_img_path = os.path.join(error_dir, f"{timestamp}_进度条检测异常.png")
                 break
                 
             # 3. 提取坐标信息
@@ -205,6 +246,10 @@ class FishingTask:
             elif similarity_fail > 0.8:
                 if logger: logger("钓鱼失败了！")
                 else: print("钓鱼失败了！")
+                if logger: logger(f"已保存失败截图以供分析。")
+                else: print(f"已保存失败截图以供分析。")
+                import numpy as np
+                cv2.imencode('.png', live_screen)[1].tofile(error_img_path) #cv2.imwrite(error_img_path, live_screen) 在某些环境下可能会有中文路径问题，改用这种方式保存截图
                 break
             else:
                 # 如果两者都没有检测到，说明可能提示还没出来，继续等待

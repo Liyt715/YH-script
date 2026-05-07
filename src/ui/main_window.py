@@ -82,6 +82,8 @@ class FishingThread(QThread):
         self.is_running = True
         self.infinite_loop = infinite_loop
         self.max_times = max_times
+        self.success_count = 0
+        self.fail_count = 0
 
     def run(self):
         """线程启动时执行的代码（后台死循环）"""
@@ -98,6 +100,14 @@ class FishingThread(QThread):
             return
 
         current_count = 0
+        
+        def task_logger(msg):
+            if "钓鱼成功！" in msg:
+                self.success_count += 1
+            elif "钓鱼失败了！" in msg:
+                self.fail_count += 1
+            self.log_signal.emit(msg)
+
         while self.is_running:
             if not self.infinite_loop and current_count >= self.max_times:
                 self.log_signal.emit(f">>> [自动钓鱼] 设定的 {self.max_times} 次任务已全部完成！")
@@ -105,9 +115,9 @@ class FishingThread(QThread):
 
             try:
                 current_count += 1
-                time.sleep(1) # 循环之间的短暂缓冲
+                time.sleep(0.5) # 等待0.5秒
                 # 调用钓鱼单次任务核心逻辑，并传入 UI 打印槽函数
-                task.run_once(logger=self.log_signal.emit, cnt=current_count)
+                task.run_once(logger=task_logger, cnt=current_count)
             except RuntimeError as e:
                 self.log_signal.emit(f'<span style="color: red;"><b>【钓鱼中断】 {str(e)}</b></span>')
                 self.is_running = False
@@ -115,6 +125,7 @@ class FishingThread(QThread):
                 self.log_signal.emit(f'<span style="color: red;"><b>【系统异常】 未知代码异常: {str(e)}</b></span>')
                 self.is_running = False
         self.log_signal.emit(">>> [自动钓鱼] 后台工作线程已安全结束")
+        self.log_signal.emit(f">>> [任务统计] 一共执行钓鱼 {current_count} 次，其中成功 {self.success_count} 次，失败 {self.fail_count} 次。")
 
     def stop(self):
         """通知线程停止并等待完成"""
@@ -256,12 +267,12 @@ class MainWindow(QMainWindow):
         time_str = datetime.datetime.now().strftime("%m-%d %H:%M:%S")
         default_color = "#FFFFFF"
         # 根据关键词自动上色
-        if "异常" in text or "失败" in text or "报错" in text:
-            # 红色加粗
-            html_text = f'<span style="color: red;">[{time_str}] <b>{text}</b></span>'
-        elif "成功" in text or "完成" in text:
+        if "成功" in text or "完成" in text:
             # 绿色
             html_text = f'<span style="color: green;">[{time_str}] {text}</span>'
+        elif "异常" in text or "失败" in text or "报错" in text:
+            # 红色加粗
+            html_text = f'<span style="color: red;">[{time_str}] <b>{text}</b></span>'
         elif ">>>" in text:
             # 蓝色（系统级提示）
             html_text = f'<span style="color: lightblue;">[{time_str}] {text}</span>'
@@ -353,10 +364,13 @@ class MainWindow(QMainWindow):
         
         if os.path.exists(temp_dir):
             try:
+                import shutil
                 for filename in os.listdir(temp_dir):
                     file_path = os.path.join(temp_dir, filename)
-                    if os.path.isfile(file_path):
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
                         os.remove(file_path)
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
                 self.log(">>> [系统系统] 已自动清理 temp/ 文件夹里的历史截图缓存。")
             except Exception as e:
                 self.log(f">>> [系统系统] 清理 temp/ 缓存失败: {e}")

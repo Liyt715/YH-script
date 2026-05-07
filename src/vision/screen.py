@@ -41,7 +41,7 @@ class ScreenCapturer:
             def callback(hwnd, extra):
                 if win32gui.IsWindowVisible(hwnd):
                     title = win32gui.GetWindowText(hwnd)
-                    if self.window_title in title:
+                    if self.window_title in title and title != "异环脚本":
                         self.hwnd = hwnd
             win32gui.EnumWindows(callback, None)
             
@@ -132,9 +132,10 @@ class ScreenCapturer:
         similarity = self.matcher.compare_similarity(filepath, yueka_img_path, roi=my_roi)
         if(similarity > 0.8):
             msg ="相似度为 {:.2f}".format(similarity)
-            self.mouse.click(960,940) # 点击月卡界面
-            time.sleep(5)
-            self.mouse.click(960,540) # 再次点击
+            # self.mouse.click(960,940) # 点击月卡界面
+            # time.sleep(5)
+            # self.mouse.click(960,940) # 再次点击
+            # time.sleep(1)
             if logger:
                 logger(f"检测到月卡界面，{msg}。已自动点击进入。请确认任务是否继续进行。")
             else:
@@ -160,4 +161,4 @@ if __name__ == "__main__":
         print(f"截图已保存到: {saved_path}")
     except RuntimeError as e:
         print(str(e))
-        
+    input("按 Enter 键退出...")

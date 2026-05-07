@@ -274,8 +274,8 @@ class ImageMatcher:
         # 3. 核心：固定阈值二值化（过滤掉背景）
         # 提取亮度大于 220 的像素（纯白图标），其他全变黑。
         # 注意：这个 220 可能需要根据游戏实际亮度微调 (200~255 之间)
-        _, binary_screen = cv2.threshold(gray_screen, 220, 255, cv2.THRESH_BINARY)
-        _, binary_template = cv2.threshold(gray_template, 220, 255, cv2.THRESH_BINARY)
+        _, binary_screen = cv2.threshold(gray_screen, 250, 255, cv2.THRESH_BINARY)
+        _, binary_template = cv2.threshold(gray_template, 250, 255, cv2.THRESH_BINARY)
         
         # 4. 在两张黑白图上进行模板匹配
         res = cv2.matchTemplate(binary_screen, binary_template, cv2.TM_CCOEFF_NORMED)
@@ -293,10 +293,10 @@ class ImageMatcher:
         return None
     def get_fishing_bar_status(self, screen_image, roi_rect):
         """
-        识别钓鱼进度条中“绿色安全区”的范围和“黄色指示线”的位置。
+        识别钓鱼进度条中“绿色安全区”的范围和“黄色指示线”的位置（增强抗干扰版）。
         
         :param screen_image: 屏幕截图 (路径或 numpy 数组)
-        :param roi_rect: 必须提供！钓鱼条所在的粗略区域 [x1, y1, x2, y2]，用于排除画面其他部分的颜色干扰
+        :param roi_rect: 必须提供！钓鱼条所在的粗略区域 [x1, y1, x2, y2]
         :return: 字典包含状态信息，例如 {'green_left': 100, 'green_right': 300, 'yellow_x': 150}
                  如果识别失败则返回 None
         """
@@ -304,10 +304,10 @@ class ImageMatcher:
         if img is None:
             return None
 
-        # 1. 严格裁剪 ROI (极大地排除背景中樱花、建筑的干扰，同时大幅提升速度)
+        # 1. 严格裁剪 ROI
         x1, y1, x2, y2 = roi_rect
         roi = img[y1:y2, x1:x2]
-        offset_x = x1 # 用于最后将坐标还原到全屏坐标系
+        offset_x = x1
 
         # 2. 转换到 HSV 色彩空间
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
@@ -315,34 +315,38 @@ class ImageMatcher:
         # ==========================================
         # 3. 提取绿色安全区范围
         # ==========================================
-        # 设定青绿色的 HSV 范围 (OpenCV中 H的范围是 0-179)
-        # 如果颜色偏蓝，把 H 的上限调高；如果偏纯绿，把 H 的下限调低
         lower_green = np.array([60, 100, 100])
         upper_green = np.array([95, 255, 255])
-        
         mask_green = cv2.inRange(hsv, lower_green, upper_green)
         
-        # 寻找绿色区域的轮廓
         contours_green, _ = cv2.findContours(mask_green, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         green_left = -1
         green_right = -1
+        valid_greens = []
         
         if contours_green:
-            # 找到面积最大的绿色轮廓 (防止细小噪点干扰)
-            largest_green = max(contours_green, key=cv2.contourArea)
-            if cv2.contourArea(largest_green) > 50: # 面积太小说明是噪点
-                # 获取该轮廓的边界框
-                xg, yg, wg, hg = cv2.boundingRect(largest_green)
+            for c in contours_green:
+                area = cv2.contourArea(c)
+                if area > 50: # 面积太小说明是噪点
+                    xg, yg, wg, hg = cv2.boundingRect(c)
+                    # 几何装甲：绿条必须是扁长的矩形（宽度至少是高度的2倍）
+                    if wg > hg * 2:
+                        valid_greens.append((area, xg, wg))
+            
+            if valid_greens:
+                # 找到符合形状特征中面积最大的绿色轮廓
+                valid_greens.sort(key=lambda x: x[0], reverse=True)
+                best_xg, best_wg = valid_greens[0][1], valid_greens[0][2]
                 # 还原为全屏 X 坐标
-                green_left = xg + offset_x
-                green_right = xg + wg + offset_x
+                green_left = best_xg + offset_x
+                green_right = best_xg + best_wg + offset_x
 
         # ==========================================
-        # 4. 提取黄色指示线位置
+        # 4. 提取黄色指示线位置 (终极抗云彩干扰版)
         # ==========================================
-        # 设定黄色的 HSV 范围
-        lower_yellow = np.array([20, 100, 150])
+        # V(明度)下限极度收紧到 200 屏蔽暗云，S(饱和度)上限放开以接纳发白的真黄线
+        lower_yellow = np.array([20, 50, 200])
         upper_yellow = np.array([35, 255, 255])
         
         mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
@@ -350,13 +354,23 @@ class ImageMatcher:
         contours_yellow, _ = cv2.findContours(mask_yellow, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
         yellow_x = -1
+        valid_yellows = []
         
         if contours_yellow:
-            largest_yellow = max(contours_yellow, key=cv2.contourArea)
-            if cv2.contourArea(largest_yellow) > 10: # 黄线比较细，面积阈值设小一点
-                xy, yy, wy, hy = cv2.boundingRect(largest_yellow)
-                # 黄线的中心X坐标
-                yellow_x = xy + (wy // 2) + offset_x
+            for c in contours_yellow:
+                area = cv2.contourArea(c)
+                if area > 3: # 过滤极小噪点
+                    xy, yy, wy, hy = cv2.boundingRect(c)
+                    # 核心几何装甲：高度必须大于等于宽度！(指示线是一根竖着的棍子)
+                    if hy >= wy:
+                        valid_yellows.append((area, xy, wy))
+            
+            if valid_yellows:
+                # 找到符合“竖线”特征中面积最大的轮廓
+                valid_yellows.sort(key=lambda x: x[0], reverse=True)
+                best_xy, best_wy = valid_yellows[0][1], valid_yellows[0][2]
+                # 还原为全屏中心 X 坐标
+                yellow_x = best_xy + (best_wy // 2) + offset_x
 
         # ==========================================
         # 5. 结果校验与返回
@@ -366,7 +380,6 @@ class ImageMatcher:
                 "green_left": green_left,
                 "green_right": green_right,
                 "yellow_x": yellow_x,
-                # 你甚至可以直接在这里算出黄线是不是在安全区内
                 "is_safe": green_left <= yellow_x <= green_right
             }
         

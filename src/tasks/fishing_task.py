@@ -31,7 +31,48 @@ class FishingTask:
         """
         执行一遍单次的钓鱼任务核心逻辑。
         """
+        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.current_temp_dir = os.path.join(root_dir, "temp", f"fishing_{cnt}")
+        self.current_cnt = cnt
+        import shutil
+        if os.path.exists(self.current_temp_dir):
+            shutil.rmtree(self.current_temp_dir)
+        os.makedirs(self.current_temp_dir, exist_ok=True)
         
+        self.slip_records = []
+        try:
+            self._run_once_impl(logger, cnt, root_dir)
+        except Exception as e:
+            # 发生异常时，检查有没有未落盘的内存截图，有则先保存下来
+            if hasattr(self, 'slip_records') and self.slip_records:
+                if logger: logger("发生异常，正在保存溜鱼期间可能遗漏的暂存截图...")
+                else: print("发生异常，正在保存溜鱼期间可能遗漏的暂存截图...")
+                import concurrent.futures
+                def _save_img(item):
+                    fname, f = item
+                    if f is not None and getattr(f, 'size', 0) > 0:
+                        cv2.imencode('.png', f)[1].tofile(os.path.join(self.current_temp_dir, fname))
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    executor.map(_save_img, self.slip_records)
+                self.slip_records.clear()
+                
+            import shutil
+            import re
+            error_dir = os.path.join(root_dir, "error")
+            os.makedirs(error_dir, exist_ok=True)
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            error_name = str(e)
+            error_name = re.sub(r'[\\/*?:"<>|]', "", error_name)[:30].strip()
+            if not error_name:
+                error_name = type(e).__name__
+            error_folder_path = os.path.join(error_dir, f"{timestamp}_{error_name}")
+            if os.path.exists(self.current_temp_dir):
+                shutil.copytree(self.current_temp_dir, error_folder_path)
+            if logger: logger(f"发生异常，文件夹已复制至: {error_folder_path}")
+            else: print(f"发生异常，文件夹已复制至: {error_folder_path}")
+            raise e
+
+    def _run_once_impl(self, logger, cnt, root_dir):
         if cnt == 1:
             # 这里可以添加对初始钓鱼界面的识别校验
             # similarity = self.matcher.compare_similarity(saved_path, r"assets\images\fishing-start.png")
@@ -75,13 +116,6 @@ class FishingTask:
             else: print(msg)
         else:
             msg = f"未检测到钓鱼按钮，无法执行钓鱼任务！请检查游戏画面是否正确，或调整模板图片和阈值。"
-            import shutil
-            error_dir = os.path.join(root_dir, "error")
-            os.makedirs(error_dir, exist_ok=True)
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            error_img_path = os.path.join(error_dir, f"{timestamp}_未检测到钓鱼按钮.png")
-            shutil.copy(saved_path, error_img_path)
-            if logger: logger(f"异常截图已保存至: {error_img_path}")
             raise RuntimeError(msg)
         
         msg_start = f"第 {cnt} 次执行钓鱼任务..."
@@ -158,13 +192,6 @@ class FishingTask:
             saved_path = self.execute_screenshot(logger=logger)
             similarity = self.matcher.compare_similarity(screen_image=saved_path, reference_image="fish-2.png", roi=roi_state)
             if time.time() - pre_time > 10:  # 超过 10 秒还未检测到，认为失败
-                import shutil
-                error_dir = os.path.join(root_dir, "error")
-                os.makedirs(error_dir, exist_ok=True)
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                error_img_path = os.path.join(error_dir, f"{timestamp}_钓鱼状态提示长时间未出现.png")
-                shutil.copy(saved_path, error_img_path)
-                if logger: logger(f"异常截图已保存至: {error_img_path}")
                 raise RuntimeError("钓鱼状态提示长时间未出现，任务执行失败！")
         self.keyboard.press_key('f')  # 继续点击 'F' 键
         """
@@ -178,14 +205,18 @@ class FishingTask:
         while status is None: 
             live_screen = self.capturer.grab_screen()
             status = self.matcher.get_fishing_bar_status(live_screen, roi_rect=bar_roi)
+        
+        self.slip_records = []
         while True:
             # 1. 瞬间截取内存画面 (极速)
             live_screen = self.capturer.grab_screen()
+            self.slip_records.append((f"fish_{cnt}_{int(time.time()*1000)}.png", live_screen))
             # 2. 获取当前进度条状态
             status = self.matcher.get_fishing_bar_status(live_screen, roi_rect=bar_roi)
             if status is None: #加强一次
                 time.sleep(0.1) # 等待 100ms 再试一次，避免偶尔的截图失败导致误判
                 live_screen = self.capturer.grab_screen()
+                self.slip_records.append((f"fish_{cnt}_{int(time.time()*1000)}.png", live_screen))
                 status = self.matcher.get_fishing_bar_status(live_screen, roi_rect=bar_roi)
             
             if status is None:
@@ -193,10 +224,6 @@ class FishingTask:
                 # 如果连续找不到进度条，说明钓鱼可能结束了（成功或失败）
                 if logger: logger("未检测到进度条，溜鱼结束。")
                 else: print("未检测到进度条，溜鱼结束。")
-                error_dir = os.path.join(root_dir, "error")
-                os.makedirs(error_dir, exist_ok=True)
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                error_img_path = os.path.join(error_dir, f"{timestamp}_进度条检测异常.png")
                 break
                 
             # 3. 提取坐标信息
@@ -238,7 +265,11 @@ class FishingTask:
         roi_fail = [850,500,1050,580] # 钓鱼失败提示的 ROI 区域坐标示例 [x1, y1, x2, y2]
         similarity_success = self.matcher.compare_similarity(screen_image=save_parh, reference_image="fish-4.png", roi=roi_seccess)
         similarity_fail = self.matcher.compare_similarity(screen_image=save_parh, reference_image="fish-5.png", roi=roi_fail)
+        pre_time = time.time()
         while True:
+            if time.time() - pre_time > 15:  # 超过 15 秒还未检测到结果，认为异常
+                meg=f"长时间未检测到钓鱼结果，任务执行异常！"
+                raise RuntimeError(meg)
             if similarity_success > 0.8:
                 if logger: logger("钓鱼成功！")
                 else: print("钓鱼成功！")
@@ -246,10 +277,19 @@ class FishingTask:
             elif similarity_fail > 0.8:
                 if logger: logger("钓鱼失败了！")
                 else: print("钓鱼失败了！")
-                if logger: logger(f"已保存失败截图以供分析。")
-                else: print(f"已保存失败截图以供分析。")
-                import numpy as np
-                cv2.imencode('.png', live_screen)[1].tofile(error_img_path) #cv2.imwrite(error_img_path, live_screen) 在某些环境下可能会有中文路径问题，改用这种方式保存截图
+                
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                error_dir = os.path.join(root_dir, "error")
+                os.makedirs(error_dir, exist_ok=True)
+                error_folder_path = os.path.join(error_dir, f"fish_{cnt}_{timestamp}_钓鱼失败")
+                
+                import shutil
+                if os.path.exists(self.current_temp_dir):
+                    shutil.copytree(self.current_temp_dir, error_folder_path)
+                    
+                if logger: logger(f"已保存失败截图文件夹以供分析: {error_folder_path}")
+                else: print(f"已保存失败截图文件夹以供分析: {error_folder_path}")
+
                 break
             else:
                 # 如果两者都没有检测到，说明可能提示还没出来，继续等待
@@ -260,6 +300,17 @@ class FishingTask:
 
         self.mouse.click(960, 540)  # 点击屏幕中央，关闭结果提示框（示例坐标，需根据实际调整）
         
+        if logger: logger("正在将溜鱼期间的截图保存到本地...")
+        else: print("正在将溜鱼期间的截图保存到本地(多线程提速)...")
+        import concurrent.futures
+        def _save_normal_img(item):
+            fname, f = item
+            if f is not None and getattr(f, 'size', 0) > 0:
+                cv2.imencode('.png', f)[1].tofile(os.path.join(self.current_temp_dir, fname))
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            executor.map(_save_normal_img, self.slip_records)
+        self.slip_records.clear()
+
         # 结束确认处理，比如关闭结算页面等...
         msg_end = f"第 {cnt} 次钓鱼任务执行完毕。"
         if logger: logger(msg_end)
@@ -271,7 +322,22 @@ class FishingTask:
         调用 ScreenCapturer 截图并保存。
         如果截图失败，抛出 RuntimeError 异常。
         """
-        saved_path = self.capturer.save_screenshot("temp", logger=logger)
+        save_dir = getattr(self, 'current_temp_dir', 'temp')
+        # 直接调用原有的截图方法，不传入 prefix 参数以防报错
+        saved_path = self.capturer.save_screenshot(save_dir, logger=logger)
+        
+        # 截图完成后，在外部将其重命名为我们需要的规范命名 (fish_cnt+时间)
+        if saved_path and os.path.exists(saved_path):
+            cnt = getattr(self, 'current_cnt', 0)
+            # 使用带毫秒的时间戳，防止一秒内多张图互相覆盖
+            new_filename = f"fish_{cnt}_{int(time.time()*1000)}.png"
+            new_saved_path = os.path.join(save_dir, new_filename)
+            try:
+                os.rename(saved_path, new_saved_path)
+                saved_path = new_saved_path
+            except Exception as e:
+                if logger: logger(f"截图重命名失败: {e}")
+                
         return saved_path
 
 # 测试代码

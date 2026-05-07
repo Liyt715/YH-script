@@ -19,6 +19,7 @@ logs/
 temp/
 src/test/
 error/
+cpp/
 
 # Ignore local configuration overrides
 config/settings.json

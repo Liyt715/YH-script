@@ -132,10 +132,16 @@ class ScreenCapturer:
         similarity = self.matcher.compare_similarity(filepath, yueka_img_path, roi=my_roi)
         if(similarity > 0.8):
             msg ="相似度为 {:.2f}".format(similarity)
-            # self.mouse.click(960,940) # 点击月卡界面
-            # time.sleep(5)
-            # self.mouse.click(960,940) # 再次点击
-            # time.sleep(1)
+            self.mouse.click(960,960) 
+            time.sleep(1)
+            self.mouse.click(960,960) 
+            time.sleep(1)
+            self.mouse.click(960,960) 
+            time.sleep(1)
+            self.mouse.click(960,960) 
+            time.sleep(1)
+            self.mouse.click(960,960) 
+            time.sleep(1)
             if logger:
                 logger(f"检测到月卡界面，{msg}。已自动点击进入。请确认任务是否继续进行。")
             else:

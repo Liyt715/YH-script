@@ -85,6 +85,11 @@ class FishingThread(QThread):
         self.success_count = 0
         self.fail_count = 0
 
+    def check_stop(self):
+        """这是一个回调函数，传进任务内部。一旦发现任务被取消，立刻引爆异常！"""
+        if not self.is_running:
+            raise Exception("USER_STOPPED")
+    
     def run(self):
         """线程启动时执行的代码（后台死循环）"""
         if self.infinite_loop:
@@ -117,13 +122,18 @@ class FishingThread(QThread):
                 current_count += 1
                 time.sleep(0.5) # 等待0.5秒
                 # 调用钓鱼单次任务核心逻辑，并传入 UI 打印槽函数
-                task.run_once(logger=task_logger, cnt=current_count)
+                task.run_once(logger=task_logger, cnt=current_count, check_stop=self.check_stop)
             except RuntimeError as e:
                 self.log_signal.emit(f'<span style="color: red;"><b>【钓鱼中断】 {str(e)}</b></span>')
                 self.is_running = False
             except Exception as e:
-                self.log_signal.emit(f'<span style="color: red;"><b>【系统异常】 未知代码异常: {str(e)}</b></span>')
-                self.is_running = False
+                if str(e) == "USER_STOPPED":
+                    self.log_signal.emit('<span style="color: orange;"><b>>>> [任务中断] 用户已主动强制停止任务</b></span>')
+                    self.is_running = False # 彻底跳出 while 循环
+                    break
+                else:
+                    self.log_signal.emit(f'<span style="color: red;"><b>【系统异常】 未知代码异常: {str(e)}</b></span>')
+                    self.is_running = False # 彻底跳出 while 循环
         self.log_signal.emit(">>> [自动钓鱼] 后台工作线程已安全结束")
         self.log_signal.emit(f">>> [任务统计] 一共执行钓鱼 {current_count} 次，其中成功 {self.success_count} 次，失败 {self.fail_count} 次。")
 

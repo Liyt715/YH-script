@@ -31,13 +31,15 @@ class ImageMatcher:
         else:
             raise ValueError("不支持的图片来源格式，必须是图片路径或 numpy 数组")
 
-    def find_template(self, screen_image, template_name, threshold=0.8):
+    def find_template(self, screen_image, template_name, threshold=0.8, roi=None, use_gray=False):
         """
         在屏幕截图中寻找指定的模板图片（寻找单个目标）
         
         :param screen_image: 屏幕截图 (可以是保存路径，比如 "temp/scr.png"，也可以是 cv2 内存数组)
         :param template_name: 模板图片的名称或相对路径，比如 "btn_start.png"
         :param threshold: 置信度阈值 (0~1)，默认 0.8。越接近 1 匹配越严格，越不容易误判。
+        :param roi: 可选区域 [x1, y1, x2, y2]，限制搜索范围，能大幅提升准确度与识别速度。
+        :param use_gray: 是否转为灰度图匹配（默认 False）。如果目标主要是颜色区分（如不同颜色的鱼饵），保留彩色匹配会大幅提升识别度。
         :return: (center_x, center_y) 元组，如果找不到则返回 None
         """
         # 1. 加载大图（整张屏幕）
@@ -53,33 +55,51 @@ class ImageMatcher:
             return None
             
         img_template = self._load_image(template_path)
+
+        offset_x, offset_y = 0, 0
+        if roi is not None:
+            x1, y1, x2, y2 = roi
+            # 极速裁剪：用 numpy 切片只保留区域内的画面
+            img_screen = img_screen[y1:y2, x1:x2]
+            offset_x, offset_y = x1, y1
         
-        # 3. 灰度化。大多数UI匹配不需要颜色信息，转成灰度图能让匹配速度翻倍且更抗干扰
-        gray_screen = cv2.cvtColor(img_screen, cv2.COLOR_BGR2GRAY)
-        gray_template = cv2.cvtColor(img_template, cv2.COLOR_BGR2GRAY)
+        # 3. 灰度化（根据参数决定是否保留色彩信息）
+        if use_gray:
+            target_screen = cv2.cvtColor(img_screen, cv2.COLOR_BGR2GRAY)
+            target_template = cv2.cvtColor(img_template, cv2.COLOR_BGR2GRAY)
+        else:
+            target_screen = img_screen
+            target_template = img_template
+            
+        # 安全校验：模板不能比截图还大
+        if target_template.shape[0] > target_screen.shape[0] or target_template.shape[1] > target_screen.shape[1]:
+            print(f"[图像匹配] 模板图比匹配区域大，跳过匹配")
+            return None
         
         # 获取目标小图的高宽
-        h, w = gray_template.shape
+        h, w = target_template.shape[:2]
         
-        # 4. 调用 OpenCV 最核心的神级防封匹配算法 (NCC算法)
-        res = cv2.matchTemplate(gray_screen, gray_template, cv2.TM_CCOEFF_NORMED)
+        # 4. 调用 OpenCV NCC匹配算法
+        res = cv2.matchTemplate(target_screen, target_template, cv2.TM_CCOEFF_NORMED)
         
         # 5. 提取最高相似度的位置和数值
         min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+
+        print(f"[调试] 寻找 {os.path.basename(template_name)}，当前画面最高相似度: {max_val:.3f}")
         
         # 6. 如果相似度达标，则计算中心坐标并返回
         if max_val >= threshold:
             top_left_x, top_left_y = max_loc
-            # 用左上角坐标加上自身宽高的一半，就是完美的中心点（给鼠标点击用）
-            center_x = top_left_x + w // 2
-            center_y = top_left_y + h // 2
+            # 用左上角坐标加上自身宽高的一半，就是完美的中心点，别忘了加上 roi 带来的偏移量
+            center_x = top_left_x + w // 2 + offset_x
+            center_y = top_left_y + h // 2 + offset_y
             
             print(f"[图像匹配] 找到 '{os.path.basename(template_name)}'，相似度: {max_val:.2f}，点击中心为: ({center_x}, {center_y})")
             return (center_x, center_y)
         
         return None
 
-    def find_all_templates(self, screen_image, template_name, threshold=0.8):
+    def find_all_templates(self, screen_image, template_name, threshold=0.8, use_gray=False):
         """
         在大图中寻找所有符合的模板（如：麻将桌上有多张一样的牌，你想全找出来）
         :return: [(x1,y1), (x2,y2), ...] 列表
@@ -91,11 +111,17 @@ class ImageMatcher:
             return []
             
         img_template = self._load_image(template_path)
-        gray_screen = cv2.cvtColor(img_screen, cv2.COLOR_BGR2GRAY)
-        gray_template = cv2.cvtColor(img_template, cv2.COLOR_BGR2GRAY)
-        h, w = gray_template.shape
         
-        res = cv2.matchTemplate(gray_screen, gray_template, cv2.TM_CCOEFF_NORMED)
+        if use_gray:
+            target_screen = cv2.cvtColor(img_screen, cv2.COLOR_BGR2GRAY)
+            target_template = cv2.cvtColor(img_template, cv2.COLOR_BGR2GRAY)
+        else:
+            target_screen = img_screen
+            target_template = img_template
+            
+        h, w = target_template.shape[:2]
+        
+        res = cv2.matchTemplate(target_screen, target_template, cv2.TM_CCOEFF_NORMED)
         loc = np.where(res >= threshold)
         
         points = []
@@ -348,7 +374,7 @@ class ImageMatcher:
         # V(明度)下限极度收紧到 200 屏蔽暗云，S(饱和度)上限放开以接纳发白的真黄线
         lower_yellow = np.array([20, 50, 200])
         upper_yellow = np.array([35, 255, 255])
-        
+
         mask_yellow = cv2.inRange(hsv, lower_yellow, upper_yellow)
         
         contours_yellow, _ = cv2.findContours(mask_yellow, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)

@@ -27,7 +27,7 @@ class FishingTask:
         self.keyboard = KeyboardController(window_title)
         # 可以按需加入 NumberReader 等其他识别工具
 
-    def run_once(self, logger=None, cnt=0):
+    def run_once(self, logger=None, cnt=0, check_stop=None):
         """
         执行一遍单次的钓鱼任务核心逻辑。
         """
@@ -41,8 +41,13 @@ class FishingTask:
         
         self.slip_records = []
         try:
-            self._run_once_impl(logger, cnt, root_dir)
+            self._run_once_impl(logger, cnt, root_dir, check_stop)
         except Exception as e:
+            if "USER_STOPPED" in str(e):
+                if os.path.exists(self.current_temp_dir):
+                    shutil.rmtree(self.current_temp_dir, ignore_errors=True)
+                raise e
+
             # 发生异常时，检查有没有未落盘的内存截图，有则先保存下来
             if hasattr(self, 'slip_records') and self.slip_records:
                 if logger: logger("发生异常，正在保存溜鱼期间可能遗漏的暂存截图...")
@@ -62,17 +67,24 @@ class FishingTask:
             os.makedirs(error_dir, exist_ok=True)
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             error_name = str(e)
-            error_name = re.sub(r'[\\/*?:"<>|]', "", error_name)[:30].strip()
+            error_name = re.sub(r'[\\/*?:"<>|]', "", error_name)[:30].strip('. ')
             if not error_name:
                 error_name = type(e).__name__
             error_folder_path = os.path.join(error_dir, f"{timestamp}_{error_name}")
             if os.path.exists(self.current_temp_dir):
                 shutil.copytree(self.current_temp_dir, error_folder_path)
-            if logger: logger(f"发生异常，文件夹已复制至: {error_folder_path}")
-            else: print(f"发生异常，文件夹已复制至: {error_folder_path}")
+            # if logger: logger(f"发生异常，文件夹已复制至: {error_folder_path}")
+            # else: print(f"发生异常，文件夹已复制至: {error_folder_path}")
             raise e
 
-    def _run_once_impl(self, logger, cnt, root_dir):
+    def _run_once_impl(self, logger, cnt, root_dir, check_stop):
+        def smart_sleep(seconds):
+            """将大块睡眠切碎成 0.05 秒的小块，每次醒来都检查一下是不是被用户强停了"""
+            end_time = time.time() + seconds
+            while time.time() < end_time:
+                if check_stop: 
+                    check_stop() # 如果用户点了停止，这里会瞬间抛出异常停止函数！
+                time.sleep(0.05)
         if cnt == 1:
             # 这里可以添加对初始钓鱼界面的识别校验
             # similarity = self.matcher.compare_similarity(saved_path, r"assets\images\fishing-start.png")
@@ -122,7 +134,7 @@ class FishingTask:
         if logger: logger(msg_start)
         else: print(msg_start)
         self.keyboard.press_key('f')  # 模拟按下 'F' 键开始钓鱼
-        time.sleep(0.5)  # 等待提示出现
+        smart_sleep(0.5)  # 等待提示出现
         saved_path = self.execute_screenshot(logger=logger)  # 立即截图，检测是否提示鱼饵用完
         roi_bait = [780,500,1150,580] # 鱼饵用完提示的 ROI 区域坐标示例 [x1, y1, x2, y2]
         similarity_bait = self.matcher.compare_similarity(screen_image=saved_path, reference_image="fish-6.png", roi=roi_bait)
@@ -131,32 +143,41 @@ class FishingTask:
             if logger: logger(msg_bait)
             else: print(msg_bait)
             self.keyboard.press_key('q')  # 模拟按下 'Q' 键打开商店界面
-            time.sleep(1)
+            smart_sleep(1)
             self.mouse.click(150, 400)  # 点击到鱼饵分类
-            time.sleep(1)
+            smart_sleep(1)
             save_parh_shop = self.execute_screenshot(logger=logger)  # 再次截图，检测商店界面是否正确打开
             roi_shop = [550,500,850,750] 
             similarity_if_fish = self.matcher.compare_similarity(screen_image=save_parh_shop, reference_image="fish-10.png", roi=roi_shop)
-            time.sleep(0.5)
+            smart_sleep(1)
             if similarity_if_fish < 0.8:
                 self.mouse.click(1060, 960)  # 点击卖出
-                time.sleep(1)
+                smart_sleep(1)
                 self.mouse.click(1170, 700)  # 点击确认卖出
-                time.sleep(1)
+                smart_sleep(1)
                 self.mouse.click(1830,60) # 点击关闭商店界面
-                time.sleep(1)
+                smart_sleep(1)
             else:
                 msg_shop = f"商店界面没有鱼可以卖出"
                 if logger: logger(msg_shop)
                 else: print(msg_shop)
             self.mouse.click(1830,60) # 点击关闭商店界面
-            time.sleep(1)
+            smart_sleep(1)
             self.keyboard.press_key('r')  # 模拟按下 'R' 键购买鱼饵
-            time.sleep(1)
+            smart_sleep(1)
+            save_parh_yuer = self.execute_screenshot(logger=logger)
+            yuer_xy=self.matcher.find_template(save_parh_yuer,"yuer.png",roi=[50,120,650,850])
+            if yuer_xy is None:
+                msg_yuer = f"未检测到万能鱼饵选项，无法自动购买鱼饵！请检查模板图片和阈值。"
+                raise RuntimeError(msg_yuer)
+            self.mouse.click(yuer_xy[0],yuer_xy[1])  # 选择万能鱼饵
+            if logger: logger("已识别到万能鱼饵，位置为: ({}, {})，正在点击购买...".format(yuer_xy[0], yuer_xy[1]))
+            else: print("已识别到万能鱼饵，位置为: ({}, {})，正在点击购买...".format(yuer_xy[0], yuer_xy[1]))
+            smart_sleep(1)
             self.mouse.click(1820, 950)  # 点击到购买上限
-            time.sleep(1)
+            smart_sleep(1)
             self.mouse.click(1600, 1030)  # 点击购买
-            time.sleep(1)
+            smart_sleep(1)
             save_parh = self.execute_screenshot(logger=logger)  # 再次截图，检测购买结果
             roi_buy = [830, 500, 1100, 580] # 购买结果提示的 ROI 区域坐标示例 [x1, y1, x2, y2]
             similarity_buy = self.matcher.compare_similarity(screen_image=save_parh, reference_image="fish-8.png", roi=roi_buy)
@@ -167,28 +188,29 @@ class FishingTask:
                 raise RuntimeError(msg_buy)
             else:
                 self.mouse.click(1160, 700) # 点击确认
-                time.sleep(2)
+                smart_sleep(2)
                 self.mouse.click(950,900)  # 点击确认购买后关闭提示框
-                time.sleep(1)
+                smart_sleep(1)
                 self.mouse.click(1830,60) # 点击关闭购买界面
-                time.sleep(1)
+                smart_sleep(2)
                 msg_buy_success = f"已成功购买鱼饵，继续执行钓鱼任务..."
                 if logger: logger(msg_buy_success)
                 else: print(msg_buy_success)
                 self.keyboard.press_key('e') # 按下 'E' 键装备鱼饵
-                time.sleep(1)
+                smart_sleep(1)
                 self.mouse.click(1170,700) # 点击更换鱼饵
-                time.sleep(1)
+                smart_sleep(1)
                 self.keyboard.press_key('f')  # 再次按下 'F' 键开始钓鱼
 
-        time.sleep(1)  # 等待钓鱼上钩的提示出现
+        smart_sleep(1)  # 等待钓鱼上钩的提示出现
 
         saved_path = self.execute_screenshot(logger=logger)  # 再次截图，检测钓鱼状态
         roi_state = [770, 245, 1175, 280] # 钓鱼状态提示的 ROI 区域坐标示例 [x1, y1, x2, y2]
         similarity = self.matcher.compare_similarity(screen_image=saved_path, reference_image="fish-2.png", roi=roi_state)
         pre_time = time.time()
         while similarity < 0.8:  # 如果钓鱼状态提示未出现，继续等待
-            time.sleep(0.1)
+            if check_stop: check_stop()  # 【新增】：每次找图前检查是否被叫停
+            smart_sleep(0.1)
             saved_path = self.execute_screenshot(logger=logger)
             similarity = self.matcher.compare_similarity(screen_image=saved_path, reference_image="fish-2.png", roi=roi_state)
             if time.time() - pre_time > 10:  # 超过 10 秒还未检测到，认为失败
@@ -208,13 +230,14 @@ class FishingTask:
         
         self.slip_records = []
         while True:
+            if check_stop: check_stop()  # 【新增】：溜鱼期间时刻检查信号！
             # 1. 瞬间截取内存画面 (极速)
             live_screen = self.capturer.grab_screen()
             self.slip_records.append((f"fish_{cnt}_{int(time.time()*1000)}.png", live_screen))
             # 2. 获取当前进度条状态
             status = self.matcher.get_fishing_bar_status(live_screen, roi_rect=bar_roi)
             if status is None: #加强一次
-                time.sleep(0.1) # 等待 100ms 再试一次，避免偶尔的截图失败导致误判
+                smart_sleep(0.1) # 等待 100ms 再试一次，避免偶尔的截图失败导致误判
                 live_screen = self.capturer.grab_screen()
                 self.slip_records.append((f"fish_{cnt}_{int(time.time()*1000)}.png", live_screen))
                 status = self.matcher.get_fishing_bar_status(live_screen, roi_rect=bar_roi)
@@ -267,6 +290,7 @@ class FishingTask:
         similarity_fail = self.matcher.compare_similarity(screen_image=save_parh, reference_image="fish-5.png", roi=roi_fail)
         pre_time = time.time()
         while True:
+            if check_stop: check_stop()  # 【新增】：等待结算画面时时刻检查信号！
             if time.time() - pre_time > 15:  # 超过 15 秒还未检测到结果，认为异常
                 meg=f"长时间未检测到钓鱼结果，任务执行异常！"
                 raise RuntimeError(meg)
@@ -278,6 +302,17 @@ class FishingTask:
                 if logger: logger("钓鱼失败了！")
                 else: print("钓鱼失败了！")
                 
+                # 在复制到 error 文件夹之前，必须先将内存中的截图落盘，否则复制过去的是空文件夹
+                if hasattr(self, 'slip_records') and self.slip_records:
+                    import concurrent.futures
+                    def _save_fail_img(item):
+                        fname, f = item
+                        if f is not None and getattr(f, 'size', 0) > 0:
+                            cv2.imencode('.png', f)[1].tofile(os.path.join(self.current_temp_dir, fname))
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        executor.map(_save_fail_img, self.slip_records)
+                    self.slip_records.clear()
+
                 timestamp = time.strftime("%Y%m%d_%H%M%S")
                 error_dir = os.path.join(root_dir, "error")
                 os.makedirs(error_dir, exist_ok=True)
@@ -293,7 +328,7 @@ class FishingTask:
                 break
             else:
                 # 如果两者都没有检测到，说明可能提示还没出来，继续等待
-                time.sleep(0.01)
+                smart_sleep(0.01)
                 save_parh = self.execute_screenshot(logger=logger)
                 similarity_success = self.matcher.compare_similarity(screen_image=save_parh, reference_image="fish-4.png", roi=roi_seccess)
                 similarity_fail = self.matcher.compare_similarity(screen_image=save_parh, reference_image="fish-5.png", roi=roi_fail)
@@ -355,3 +390,4 @@ if __name__ == "__main__":
         task.run_once(cnt=1)
     except Exception as e:
         print(f"捕获到异常: {e}")
+    input("按回车键退出...")

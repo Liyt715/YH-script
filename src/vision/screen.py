@@ -1,24 +1,37 @@
+import sys
+import ctypes
+
+# 强制开启 DPI 感知，防止因 Windows 缩放（比如 125%, 150%）导致取到的窗口尺寸是不准确的“逻辑像素”，从而截断图像
+
+def enable_high_dpi_awareness():
+    """强制 Windows 禁用 DPI 虚拟化缩放，获取真实的物理像素分辨率"""
+    if sys.platform == "win32":
+        try:
+            # 第一优先级：调用 Windows 8.1+ 的 Per-Monitor V1 API (参数 2)
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            try:
+                # 第二优先级：降级调用 Windows Vista / 8 的 System DPI Aware API
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
+
+# 【绝对规则】：这行代码必须放在所有第三方图形库 (如 cv2, PySide6, mss, PIL) 被 import 之前！
+enable_high_dpi_awareness()
+
 import cv2
 import numpy as np
 import win32gui
 import win32ui
 import win32con
-import ctypes
 import os
 import time
-import sys
 from datetime import datetime
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from src.control.mouse_kbd import MouseController
 from src.vision.matcher import ImageMatcher
-
-# 强制开启 DPI 感知，防止因 Windows 缩放（比如 125%, 150%）导致取到的窗口尺寸是不准确的“逻辑像素”，从而截断图像
-try:
-    ctypes.windll.user32.SetProcessDPIAware()
-except AttributeError:
-    pass
 
 class ScreenCapturer:
     def __init__(self, window_title="异环"):

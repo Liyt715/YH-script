@@ -120,7 +120,9 @@ class FishingThread(QThread):
 
             try:
                 current_count += 1
-                time.sleep(0.5) # 等待0.5秒
+                if current_count % 100 == 0:
+                    self.clean_temp_dir() # 每100次自动清理一次临时文件，防止磁盘被占满
+                time.sleep(1) # 等待1秒
                 # 调用钓鱼单次任务核心逻辑，并传入 UI 打印槽函数
                 task.run_once(logger=task_logger, cnt=current_count, check_stop=self.check_stop)
             except RuntimeError as e:
@@ -141,6 +143,24 @@ class FishingThread(QThread):
         """通知线程停止并等待完成"""
         self.is_running = False
         self.wait() # 等待线程安全退出，防止资源泄露导致奔溃
+
+    def clean_temp_dir(self):
+        """清理临时文件夹中的所有数据"""
+        root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        temp_dir = os.path.join(root_dir, "temp")
+        
+        if os.path.exists(temp_dir):
+            try:
+                import shutil
+                for filename in os.listdir(temp_dir):
+                    file_path = os.path.join(temp_dir, filename)
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
+                        os.remove(file_path)
+                    elif os.path.isdir(file_path):
+                        shutil.rmtree(file_path)
+                self.log_signal.emit(">>> [系统提醒] 满100次循环，已自动清理 temp/ 里的历史截图。")
+            except Exception as e:
+                self.log_signal.emit(f">>> [系统提醒] 自动清理 temp/ 缓存失败: {e}")
 
 
 class MainWindow(QMainWindow):

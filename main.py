@@ -1,5 +1,29 @@
 import sys
 import os
+import ctypes
+
+def enable_high_dpi_awareness():
+    """强制 Windows 禁用 DPI 虚拟化缩放，获取真实的物理像素分辨率"""
+    if sys.platform == "win32":
+        try:
+            # 第一优先级：Windows 8.1+ (Per-Monitor V1 API)
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            try:
+                # 第二优先级：Windows Vista / 8
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
+
+# 立即执行 DPI 提权（绝对不能放在文件后面）
+enable_high_dpi_awareness()
+
+# 彻底关闭 Qt6 底层关于窗口的警告日志输出
+os.environ["QT_LOGGING_RULES"] = "qt.qpa.window=false"
+
+# 注意：Qt6 默认开启了高分屏自适应渲染。不需要强行关闭它的缩放，
+# 让它自己去适应 200% 的屏幕即可，这样按钮才不会小得看不见。
+# os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"  
 
 # 将项目根目录添加到系统路径，确保能正确导入 src 目录下的模块
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -15,11 +39,6 @@ from src.ui.main_window import MainWindow
 DEBUG_MODE = True
 
 def main():
-    # # 提前阻断 Qt 的默认缩放行为，防止与底层的鼠标/截图物理坐标系起冲突
-    # os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
-    # 彻底关闭 Qt6 底层关于窗口 (qpa.window) 的警告日志输出
-    os.environ["QT_LOGGING_RULES"] = "qt.qpa.window=false"
-
     # 创建 Qt 应用程序实例
     app = QApplication(sys.argv)
     
@@ -32,7 +51,6 @@ def main():
     
 
 if __name__ == "__main__":
-    import ctypes
     # 自动获取管理员权限的魔法代码
     if not ctypes.windll.shell32.IsUserAnAdmin():
         print("当前无管理员权限，正在请求 UAC 提权...")

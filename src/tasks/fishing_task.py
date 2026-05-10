@@ -138,7 +138,7 @@ class FishingTask:
         saved_path = self.execute_screenshot(logger=logger)  # 立即截图，检测是否提示鱼饵用完
         roi_bait = [780,500,1150,580] # 鱼饵用完提示的 ROI 区域坐标示例 [x1, y1, x2, y2]
         similarity_bait = self.matcher.compare_similarity(screen_image=saved_path, reference_image="fish-6.png", roi=roi_bait)
-        if similarity_bait > 0.8:
+        if similarity_bait > 0.7:
             msg_bait = f"检测到鱼饵用完提示，正在自动购买鱼饵..."
             if logger: logger(msg_bait)
             else: print(msg_bait)
@@ -201,6 +201,8 @@ class FishingTask:
                 self.mouse.click(1170,700) # 点击更换鱼饵
                 smart_sleep(1)
                 self.keyboard.press_key('f')  # 再次按下 'F' 键开始钓鱼
+        else:
+            print("未检测到鱼饵用完提示，相似度为{}，继续执行钓鱼任务...".format(similarity_bait))
 
         smart_sleep(1)  # 等待钓鱼上钩的提示出现
 
@@ -213,7 +215,7 @@ class FishingTask:
             smart_sleep(0.1)
             saved_path = self.execute_screenshot(logger=logger)
             similarity = self.matcher.compare_similarity(screen_image=saved_path, reference_image="fish-2.png", roi=roi_state)
-            if time.time() - pre_time > 10:  # 超过 10 秒还未检测到，认为失败
+            if time.time() - pre_time > 30:  # 超过 30 秒还未检测到，认为失败
                 raise RuntimeError("钓鱼状态提示长时间未出现，任务执行失败！")
         self.keyboard.press_key('f')  # 继续点击 'F' 键
         """

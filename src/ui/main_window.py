@@ -83,7 +83,6 @@ class FishingThread(QThread):
         self.infinite_loop = infinite_loop
         self.max_times = max_times
         self.success_count = 0
-        self.fail_count = 0
 
     def check_stop(self):
         """这是一个回调函数，传进任务内部。一旦发现任务被取消，立刻引爆异常！"""
@@ -109,8 +108,6 @@ class FishingThread(QThread):
         def task_logger(msg):
             if "钓鱼成功！" in msg:
                 self.success_count += 1
-            elif "钓鱼失败了！" in msg:
-                self.fail_count += 1
             self.log_signal.emit(msg)
 
         while self.is_running:
@@ -137,7 +134,7 @@ class FishingThread(QThread):
                     self.log_signal.emit(f'<span style="color: red;"><b>【系统异常】 未知代码异常: {str(e)}</b></span>')
                     self.is_running = False # 彻底跳出 while 循环
         self.log_signal.emit(">>> [自动钓鱼] 后台工作线程已安全结束")
-        self.log_signal.emit(f">>> [任务统计] 一共执行钓鱼 {current_count} 次，其中成功 {self.success_count} 次，失败 {self.fail_count} 次。")
+        self.log_signal.emit(f">>> [任务统计] 一共执行钓鱼 {current_count} 次，其中成功 {self.success_count} 次，失败 {current_count - self.success_count} 次。")
 
     def stop(self):
         """通知线程停止并等待完成"""
